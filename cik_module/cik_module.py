@@ -1,7 +1,8 @@
 # Author: Alfonso Rada
-# Date: 07/21/2025
+# Date: 08/04/2025
 # File Name: cik_module.py
-# Description:  A module that can be used to lookup the CIK number of companys registered with the SEC
+# Description:  A module that can be used to lookup the CIK number of companys registered with the SEC, 
+# and grab its 10K and/or 10Q forms by year and/or quarter
 
 import requests
 
@@ -56,8 +57,8 @@ class SecEdgar:
             print(f"Ticker: {ticker}, does not exist.")
 
     '''
-    Returns the url to a company's 10-K form given the year and
-    the company's CIK number
+    Returns the content to a company's 10-K form given the company's 
+    CIK number and the year
     '''
     def annual_filing(self, cik, year):
         # retreiving a company's submission data from submissions API
@@ -66,38 +67,108 @@ class SecEdgar:
         response = requests.get(submissions_url, headers=self.headers)
         response_json = response.json()
 
-        years = self.get_years_of_10Ks(cik, response_json)
-        
-        if year in years:
-            return years[year]
+        url_10K = self.find_10K_file(cik, year, response_json)
+        if url_10K:
+            response = requests.get(url_10K, headers=self.headers)
+            return response.text
+
         return f"10-K form for the year {year} could not be found."
+        
+    '''
+    Returns the url to a company's 10K by searching for a matching year
+    '''
+    def find_10K_file(self, cik, year, response_json):
+        # looking for the 10-K that corresponds to the year we're looking for
+        forms = response_json['filings']['recent']['form']
+        for index, desc in enumerate(forms):
+            if desc == '10-K':
+                date = response_json['filings']['recent']['reportDate'][index]
+                yr = int(date[:4])
+                if yr == year:
+                    accessionNumber = response_json['filings']['recent']['accessionNumber'][index]
+                    accn_for_fileurl = self.adjust_accn_for_fileurl(accessionNumber)
+                    primaryDocument = response_json['filings']['recent']['primaryDocument'][index]
+
+                    file = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn_for_fileurl}/{primaryDocument}"
+                    return file
+                
+        return None
+
+    '''
+    Returns the content to a company's 10-Q form given the company's CIK number, the year, and the quarter
+    '''
+    def quarterly_filing(self, cik, year, quarter):
+        # retreiving a company's submission data from submissions API
+        cik_for_submissions = self.adjust_cik_for_submissions(cik)
+        submissions_url = f"https://data.sec.gov/submissions/CIK{cik_for_submissions}.json"
+        response = requests.get(submissions_url, headers=self.headers)
+        response_json = response.json()
+
+        url_10Q = self.find_10Q_file(cik, year, quarter, response_json)
+        if url_10Q:
+            response = requests.get(url_10Q, headers=self.headers)
+            return response.text
+        
+        return f"10-Q form for the year {year} and quarter {quarter} could not be found."
     
     '''
-    Returns a dictionary with the years of filed 10-K forms as keys and
-    the corresponding urls to the forms as values
+    Returns the url to a company's 10Q after determining the fiscal year end and the quarter date
     '''
-    def get_years_of_10Ks(self, cik, response_json):
-        # grabbing the indices that correspond to 10-K forms
-        doc_descriptions = response_json['filings']['recent']['primaryDocDescription']
-        indices_10K = []
-        for index, desc in enumerate(doc_descriptions):
+    def find_10Q_file(self, cik, year, quarter, response_json):
+        # finding the report month and year that corresponds to the quarter we're looking for
+        target_month, target_year = self.find_quarter_date(year, quarter, response_json)
+
+        # looking for the 10-Q that corresponds to the report date we're looking for
+        forms = response_json['filings']['recent']['form']
+        for index, desc in enumerate(forms):
+            if desc == '10-Q':
+                date = response_json['filings']['recent']['reportDate'][index]
+                yr = int(date[:4])
+                mth = int(date[5:7])
+                if mth == target_month and yr == target_year:
+                    accessionNumber = response_json['filings']['recent']['accessionNumber'][index]
+                    accn_for_fileurl = self.adjust_accn_for_fileurl(accessionNumber)
+                    primaryDocument = response_json['filings']['recent']['primaryDocument'][index]
+
+                    file = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn_for_fileurl}/{primaryDocument}"
+                    return file
+                
+        return None
+    
+    '''
+    Returns the report date of a company's 10-K form given the year (determines the end of a fiscal year)
+    '''
+    def get_date_10K(self, year_target, response_json):
+        forms = response_json['filings']['recent']['form']
+        for index, desc in enumerate(forms):
             if desc == '10-K':
-                indices_10K.append(index)
+                date = response_json['filings']['recent']['reportDate'][index]
+                year = int(date[:4])
+                if year == year_target:
+                    return date
+    
+    '''
+    Finds, what should be, the report month and year of a company's 10-Q form given the year and the quarter
+    '''
+    def find_quarter_date(self, year, quarter, response_json):
+        # find the date of the given year's 10K to know the fiscal year end to determine quarter dates
+        fy_end = self.get_date_10K(year, response_json)
+        fy_end_month = int(fy_end[5:7])
 
-        # gets the years for all the 10-K's and stores them in a dictionary with its file
-        years = {}
-        for index in indices_10K:
-            date = response_json['filings']['recent']['filingDate'][index]
-            year = int(date[:4])
+        # mapping the quarter we're looking for to the month that it's supposed to report on
+        quarter_month = {
+            1 : fy_end_month - 9,
+            2 : fy_end_month - 6,
+            3 : fy_end_month - 3
+        }
 
-            accessionNumber = response_json['filings']['recent']['accessionNumber'][index]
-            accn_for_fileurl = self.adjust_accn_for_fileurl(accessionNumber)
-            primaryDocument = response_json['filings']['recent']['primaryDocument'][index]
-            file = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn_for_fileurl}/{primaryDocument}"
+        # adjusting for possible negative values in calculating the month
+        target_month, target_year = quarter_month[quarter], year
+        if target_month < 1:
+            target_month += 12
+            target_year -= 1
 
-            years[year] = file
-
-        return years
+        return target_month, target_year
 
     '''
     CIK number needs to be 10 digits in submissions url, this function returns
@@ -122,5 +193,8 @@ class SecEdgar:
 
 sec = SecEdgar("https://www.sec.gov/files/company_tickers.json")
 return_tuple = sec.ticker_to_cik('NVDA')
-print(return_tuple)
-print(sec.annual_filing(return_tuple[0], 2023))
+nvda_cik = return_tuple[0]
+nvda_2021_10K = sec.annual_filing(nvda_cik, 2021)
+print(nvda_2021_10K)
+nvda_2021_10Q = sec.quarterly_filing(nvda_cik, 2021, 1)
+#print(nvda_2021_10Q)
