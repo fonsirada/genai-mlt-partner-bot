@@ -10,5 +10,3 @@ def lambda_handler(event, context):
 
     s3.put_object(Bucket='alfonso-rada-bucket', Key='company_tickers.json', Body=response.content)
     return "Upload complete!"
-
-print(lambda_handler({},''))

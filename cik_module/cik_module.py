@@ -5,6 +5,8 @@
 # and grab its 10K and/or 10Q forms by year and/or quarter
 
 import requests
+import boto3
+import json
 
 '''
     Given a URL to an SEC public JSON file, extract its information and use it to
@@ -14,12 +16,17 @@ class SecEdgar:
     '''
     Grabbing the JSON from the SEC URL and filling dictionaries for lookup
     '''
-    def __init__(self, fileurl):
-        self.fileurl = fileurl
-
+    def __init__(self, bucket_name, key_name):
         self.headers = {'user-agent': 'MLT arada@hamilton.edu'}
-        r = requests.get(self.fileurl, headers=self.headers)
-        self.filejson = r.json()
+
+        self.s3 = boto3.client('s3')
+        self.bucket_name = bucket_name
+        self.key_name = key_name
+
+        obj =  self.s3.get_object(Bucket = self.bucket_name, Key = self.key_name)
+        data = obj['Body'].read()
+
+        self.filejson = json.loads(data)
 
         self.cik_json_to_dict()
 
@@ -191,10 +198,10 @@ class SecEdgar:
                 new_accn += char
         return new_accn
 
-sec = SecEdgar("https://www.sec.gov/files/company_tickers.json")
-return_tuple = sec.ticker_to_cik('NVDA')
-nvda_cik = return_tuple[0]
-nvda_2021_10K = sec.annual_filing(nvda_cik, 2021)
-print(nvda_2021_10K)
-nvda_2021_10Q = sec.quarterly_filing(nvda_cik, 2021, 1)
-#print(nvda_2021_10Q)
+sec = SecEdgar("alfonso-rada-bucket", "company_tickers.json")
+# return_tuple = sec.ticker_to_cik('NVDA')
+# nvda_cik = return_tuple[0]
+# nvda_2021_10K = sec.annual_filing(nvda_cik, 2021)
+# print(nvda_2021_10K)
+# nvda_2021_10Q = sec.quarterly_filing(nvda_cik, 2021, 1)
+# print(nvda_2021_10Q)
