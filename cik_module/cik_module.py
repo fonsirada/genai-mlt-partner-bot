@@ -69,6 +69,9 @@ class SecEdgar:
     CIK number and the year
     '''
     def annual_filing(self, cik, year):
+        if year > 2025:
+            return "Invalid year input."
+
         # retreiving a company's submission data from submissions API
         cik_for_submissions = self.adjust_cik_for_submissions(cik)
         submissions_url = f"https://data.sec.gov/submissions/CIK{cik_for_submissions}.json"
@@ -107,6 +110,10 @@ class SecEdgar:
     Returns the content to a company's 10-Q form given the company's CIK number, the year, and the quarter
     '''
     def quarterly_filing(self, cik, year, quarter):
+        # invalid year/quarter input
+        if year > 2026 or quarter < 1 or quarter > 3:
+            return "Invalid year or quarter input."
+
         # retreiving a company's submission data from submissions API
         cik_for_submissions = self.adjust_cik_for_submissions(cik)
         submissions_url = f"https://data.sec.gov/submissions/CIK{cik_for_submissions}.json"
@@ -127,7 +134,7 @@ class SecEdgar:
     def find_10Q_file(self, cik, year, quarter, response_json):
         # finding the report month and year that corresponds to the quarter we're looking for
         target_month, target_year = self.find_quarter_date(year, quarter, response_json)
-
+        
         # looking for the 10-Q that corresponds to the report date we're looking for
         forms = response_json['filings']['recent']['form']
         for index, desc in enumerate(forms):
@@ -146,9 +153,14 @@ class SecEdgar:
         return None
     
     '''
-    Returns the report date of a company's 10-K form given the year (determines the end of a fiscal year)
+    Returns the report date of a company's 10-K form given the year (determines the end of a fiscal year).
+    For determining a company's 10-Q report date.
     '''
     def get_date_10K(self, year_target, response_json):
+        # treat a 2026 10K like 2025 since it hasn't come out yet, and use for determining 2026 10Q report date
+        if year_target == 2026:
+            year_target = 2025
+
         forms = response_json['filings']['recent']['form']
         for index, desc in enumerate(forms):
             if desc == '10-K':
@@ -165,18 +177,56 @@ class SecEdgar:
         fy_end = self.get_date_10K(year, response_json)
         fy_end_month = int(fy_end[5:7])
 
-        # mapping the quarter we're looking for to the month that it's supposed to report on
+        target_month, target_year = self.determine_month(fy_end_month, quarter, year)
+
+        return target_month, target_year
+    
+    '''
+    Using the report month of a company's 10-K, works backwards to find, what should be, the report month of a company's 
+    10-Q form
+    '''
+    def determine_month(self, fy_end_month, quarter, year):
+        # handling determining the month for a 10-Q in a future calendar year
+        if year == 2026:
+            return self.handle_future_cal_year(fy_end_month, quarter, year)
+
+        target_year = year
+        # determining report month relative to that year's 10-K
         quarter_month = {
             1 : fy_end_month - 9,
             2 : fy_end_month - 6,
             3 : fy_end_month - 3
         }
 
+        target_month = quarter_month[quarter]
         # adjusting for possible negative values in calculating the month
-        target_month, target_year = quarter_month[quarter], year
         if target_month < 1:
             target_month += 12
             target_year -= 1
+
+        return target_month, target_year
+    
+    '''
+    If looking for a 10-Q in a calendar that hasn't happened yet, the 10-K for that year will not exist
+    (and likely the 10-Q unless it's well into the previous calendar year), so use the current year's 10-K
+    and work forwards rather than backwards to find the report month. Should only work for the upcoming year.
+    '''
+    def handle_future_cal_year(self, fy_end_month, quarter, year):
+        target_year = year - 1
+        
+        # handling 10-Qs in calendar years that haven't happened yet (since 10-K hasn't come out yet)
+        quarter_month_future = {
+            1 : fy_end_month + 3,
+            2 : fy_end_month + 6,
+            3 : fy_end_month + 9
+        }
+
+        target_month = quarter_month_future[quarter]
+        # adjusting for months > 12 in calculating the month this shouldn't happen until the
+        # calendar year happens, and at that point you can adjust this handling to the upcoming year
+        if target_month > 12:
+            target_month -= 12
+            target_year += 1
 
         return target_month, target_year
 
@@ -214,10 +264,10 @@ class SecEdgar:
         clean_text = '\n'.join(lines)
         return clean_text
 
-sec = SecEdgar("alfonso-rada-bucket", "company_tickers.json")
+# sec = SecEdgar("alfonso-rada-bucket", "company_tickers.json")
 # return_tuple = sec.ticker_to_cik('NVDA')
 # nvda_cik = return_tuple[0]
-# nvda_2021_10K = sec.annual_filing(nvda_cik, 2021)
-# print(nvda_2021_10K)
-# nvda_2021_10Q = sec.quarterly_filing(nvda_cik, 2021, 1)
-# print(nvda_2021_10Q)
+# nvda_2025_10K = sec.annual_filing(nvda_cik, 2025)
+# print(nvda_2025_10K)
+# nvda_2026_10Q = sec.quarterly_filing(nvda_cik, 2026, 1)
+# print(nvda_2026_10Q)
