@@ -4,6 +4,7 @@
 # Description:  A module that can be used to lookup the CIK number of companys registered with the SEC, 
 # and grab its 10K and/or 10Q forms by year and/or quarter
 
+from bs4 import BeautifulSoup
 import requests
 import boto3
 import json
@@ -77,7 +78,8 @@ class SecEdgar:
         url_10K = self.find_10K_file(cik, year, response_json)
         if url_10K:
             response = requests.get(url_10K, headers=self.headers)
-            return response.text
+            text = self.extract_text_from_html(response.text)
+            return text
 
         return f"10-K form for the year {year} could not be found."
         
@@ -114,7 +116,8 @@ class SecEdgar:
         url_10Q = self.find_10Q_file(cik, year, quarter, response_json)
         if url_10Q:
             response = requests.get(url_10Q, headers=self.headers)
-            return response.text
+            text = self.extract_text_from_html(response.text)
+            return text
         
         return f"10-Q form for the year {year} and quarter {quarter} could not be found."
     
@@ -197,6 +200,19 @@ class SecEdgar:
             if char != '-':
                 new_accn += char
         return new_accn
+    
+    '''
+    Cleans up the raw html from a file, leaving just the actual text from the document
+    '''
+    def extract_text_from_html(self, raw_html):
+        soup = BeautifulSoup(raw_html, 'html.parser')
+        text = soup.get_text(separator='\n')
+
+        # Remove trailing whitespace but keep everything else, including empty lines
+        lines = [line.strip() for line in text.split('\n')]
+
+        clean_text = '\n'.join(lines)
+        return clean_text
 
 sec = SecEdgar("alfonso-rada-bucket", "company_tickers.json")
 # return_tuple = sec.ticker_to_cik('NVDA')
