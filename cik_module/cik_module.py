@@ -1,5 +1,5 @@
 # Author: Alfonso Rada
-# Date: 08/04/2025
+# Date: 08/12/2025
 # File Name: cik_module.py
 # Description:  A module that can be used to lookup the CIK number of companys registered with the SEC, 
 # and grab its 10K and/or 10Q forms by year and/or quarter
@@ -10,12 +10,12 @@ import boto3
 import json
 
 '''
-    Given a URL to an SEC public JSON file, extract its information and use it to
-    lookup a company's CIK number by name or by ticker symbol.
+    Extract information from the SEC's EDGAR API.
 '''
 class SecEdgar:
     '''
-    Grabbing the JSON from the SEC URL and filling dictionaries for lookup
+    Grabbing the JSON containing company name, ticker and cik information from the S3 
+    bucket and filling dictionaries for CIK lookup. 
     '''
     def __init__(self, bucket_name, key_name):
         self.headers = {'user-agent': 'MLT arada@hamilton.edu'}
@@ -65,10 +65,11 @@ class SecEdgar:
             print(f"Ticker: {ticker}, does not exist.")
 
     '''
-    Returns the content to a company's 10-K form given the company's 
-    CIK number and the year
+    Returns the text to a company's 10-K form given the company's 
+    CIK number and the year. Returns None if no 10-K was found for the given year.
     '''
     def annual_filing(self, cik, year):
+        # invalid year input
         if year > 2025:
             return "Invalid year input."
 
@@ -84,10 +85,12 @@ class SecEdgar:
             text = self.extract_text_from_html(response.text)
             return text
 
-        return f"10-K form for the year {year} could not be found."
+        print(f"10-K form for the year {year} could not be found.")
+        return None
         
     '''
-    Returns the url to a company's 10K by searching for a matching year
+    Returns the url to a company's 10-K by searching for a matching year. 
+    Returns None if no 10-K was found for the given year.
     '''
     def find_10K_file(self, cik, year, response_json):
         # looking for the 10-K that corresponds to the year we're looking for
@@ -107,7 +110,8 @@ class SecEdgar:
         return None
 
     '''
-    Returns the content to a company's 10-Q form given the company's CIK number, the year, and the quarter
+    Returns the content to a company's 10-Q form given the company's CIK number, the year, and the quarter.
+    Returns None if no 10-Q was found for the given year and quarter.
     '''
     def quarterly_filing(self, cik, year, quarter):
         # invalid year/quarter input
@@ -126,14 +130,19 @@ class SecEdgar:
             text = self.extract_text_from_html(response.text)
             return text
         
-        return f"10-Q form for the year {year} and quarter {quarter} could not be found."
+        print(f"10-Q form for the year {year} and quarter {quarter} could not be found.")
+        return None
     
     '''
-    Returns the url to a company's 10Q after determining the fiscal year end and the quarter date
+    Returns the url to a company's 10-Q after determining the fiscal year end and the quarter date.
+    Returns None if no 10-Q was found for the given year and/or quarter.
     '''
     def find_10Q_file(self, cik, year, quarter, response_json):
         # finding the report month and year that corresponds to the quarter we're looking for
-        target_month, target_year = self.find_quarter_date(year, quarter, response_json)
+        return_tuple = self.find_quarter_date(year, quarter, response_json)
+        if not return_tuple:
+            return None
+        target_month, target_year = return_tuple
         
         # looking for the 10-Q that corresponds to the report date we're looking for
         forms = response_json['filings']['recent']['form']
@@ -149,14 +158,30 @@ class SecEdgar:
 
                     file = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn_for_fileurl}/{primaryDocument}"
                     return file
-                
+
         return None
     
     '''
+    Finds, what should be, the report month and year of a company's 10-Q form given the year and the quarter.
+    Returns None if no 10-K found.
+    '''
+    def find_quarter_date(self, year, quarter, response_json):
+        # find the date of the given year's 10K to know the fiscal year end to determine quarter dates
+        fy_end = self.get_date_10K(year, response_json)
+        if not fy_end:
+            return None
+        fy_end_month = int(fy_end[5:7])
+
+        target_month, target_year = self.determine_month(fy_end_month, quarter, year)
+
+        return target_month, target_year
+    
+    '''
     Returns the report date of a company's 10-K form given the year (determines the end of a fiscal year).
-    For determining a company's 10-Q report date.
+    Used for offsetting to determine a company's 10-Q report date. Returns None if no 10-K found.
     '''
     def get_date_10K(self, year_target, response_json):
+        init_year = year_target
         # treat a 2026 10K like 2025 since it hasn't come out yet, and use for determining 2026 10Q report date
         if year_target == 2026:
             year_target = 2025
@@ -168,22 +193,16 @@ class SecEdgar:
                 year = int(date[:4])
                 if year == year_target:
                     return date
+        
+        # Amazon scenario - 2025 10-K won't be out until 2026, so to find 2025 10-Q's use 2024 10-K
+        if init_year == 2025:
+            return self.get_date_10K(2024, response_json)
+        
+        return None
     
     '''
-    Finds, what should be, the report month and year of a company's 10-Q form given the year and the quarter
-    '''
-    def find_quarter_date(self, year, quarter, response_json):
-        # find the date of the given year's 10K to know the fiscal year end to determine quarter dates
-        fy_end = self.get_date_10K(year, response_json)
-        fy_end_month = int(fy_end[5:7])
-
-        target_month, target_year = self.determine_month(fy_end_month, quarter, year)
-
-        return target_month, target_year
-    
-    '''
-    Using the report month of a company's 10-K, works backwards to find, what should be, the report month of a company's 
-    10-Q form
+    Using the report month of a company's 10-K, works backwards to find, what should be, 
+    the report month of a company's 10-Q form.
     '''
     def determine_month(self, fy_end_month, quarter, year):
         # handling determining the month for a 10-Q in a future calendar year
@@ -207,9 +226,8 @@ class SecEdgar:
         return target_month, target_year
     
     '''
-    If looking for a 10-Q in a calendar that hasn't happened yet, the 10-K for that year will not exist
-    (and likely the 10-Q unless it's well into the previous calendar year), so use the current year's 10-K
-    and work forwards rather than backwards to find the report month. Should only work for the upcoming year.
+    Returns the month and year for a 10-Q when looking in a year whose 10-K doesn't exist yet.
+    Uses the current (or previous) year's 10-K and works forwards rather than backwards to find the report month.
     '''
     def handle_future_cal_year(self, fy_end_month, quarter, year):
         target_year = year - 1
@@ -264,10 +282,11 @@ class SecEdgar:
         clean_text = '\n'.join(lines)
         return clean_text
 
+## testing
 # sec = SecEdgar("alfonso-rada-bucket", "company_tickers.json")
-# return_tuple = sec.ticker_to_cik('NVDA')
-# nvda_cik = return_tuple[0]
+# return_tuple = sec.ticker_to_cik('AMZN')
+# amzn_cik = return_tuple[0]
 # nvda_2025_10K = sec.annual_filing(nvda_cik, 2025)
 # print(nvda_2025_10K)
-# nvda_2026_10Q = sec.quarterly_filing(nvda_cik, 2026, 1)
-# print(nvda_2026_10Q)
+# amzn_2026_10Q = sec.quarterly_filing(amzn_cik, 2026, 1)
+# print(amzn_2026_10Q)

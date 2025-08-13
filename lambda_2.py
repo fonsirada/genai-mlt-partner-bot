@@ -1,6 +1,16 @@
+# Author: Alfonso Rada
+# Date: 08/12/2025
+# File Name: lambda_2.py
+# Description: Returns the filing document (10-K or 10-Q) that the user
+# asks for input by specifying document type, ticker, year, and quarter.
+
 from cik_module.cik_module import SecEdgar
 import json
 
+'''
+Returns the text of the specific document the user is looking for
+from the CIK lookup module.
+'''
 def get_filing(request_type, ticker, year, quarter = None):
     sec = SecEdgar('alfonso-rada-bucket', 'company_tickers.json')
     cik = sec.ticker_to_cik(ticker)[0]
@@ -25,11 +35,11 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"Error occurred: {e}")
 
+## testing
 # test_lambda_2 = {
 #     "request_type": "Quarter",
 #     "ticker": "NVDA",
 #     "year": 2026,
 #     "quarter": 1
 # }
-
 # print(json.loads(lambda_handler(test_lambda_2, '')['body']))

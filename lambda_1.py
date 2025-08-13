@@ -1,3 +1,9 @@
+# Author: Alfonso Rada
+# Date: 08/12/2025
+# File Name: lambda_1.py
+# Description:  Uploads the SEC's JSON on company ticker information to an S3 bucket daily
+# for use by CIK lookup module.
+
 import boto3
 import requests
 
